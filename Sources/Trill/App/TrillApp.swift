@@ -40,6 +40,10 @@ enum WindowID {
 final class TrillAppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
+    func applicationWillTerminate(_ notification: Notification) {
+        AppState.shared.flushSaves(wait: true)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppState.shared.start()
         AppState.shared.$settings
@@ -78,9 +82,10 @@ enum AppActivation {
     @MainActor
     static func openSettings() {
         activate()
-        let name = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
-            ? "showSettingsWindow:" : "showPreferencesWindow:"
-        NSApp.sendAction(Selector(name), to: nil, from: nil)
+        // Ventura's selector is showSettingsWindow:; the older name is only a fallback.
+        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        }
         DispatchQueue.main.async { activate() }
     }
 }

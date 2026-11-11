@@ -124,9 +124,16 @@ struct DiagnosticsView: View {
                 }
                 TableColumn("Matched rule") { entry in
                     if let name = entry.matchedRuleName {
-                        Label(name, systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .labelStyle(.titleAndIcon)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(name, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .labelStyle(.titleAndIcon)
+                            if let warning = entry.warning {
+                                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
                     } else {
                         Text("No match").foregroundStyle(.tertiary)
                     }

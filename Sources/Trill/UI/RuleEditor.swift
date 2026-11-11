@@ -116,11 +116,14 @@ struct RuleEditor: View {
             HStack(spacing: 14) {
                 HStack(spacing: 10) {
                     Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                    Slider(value: $rule.volume, in: 0...2, step: 0.01)
+                    Slider(value: Binding(get: { rule.volume }, set: { rule.volume = wholePercent($0) }), in: 0...2)
+                        .labelsHidden()
                         .background(alignment: .center) {
-                            Capsule()   // marker at 100%
-                                .fill(Color.secondary.opacity(0.55))
-                                .frame(width: 2, height: 12)
+                            // 100% marker: the range is symmetric, so it sits at the exact centre; it is
+                            // taller than the track so it shows above and below it.
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.6))
+                                .frame(width: 2, height: 16)
                                 .allowsHitTesting(false)
                         }
                     Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
@@ -153,6 +156,9 @@ struct RuleEditor: View {
                     .help("Preview (⌘P)")
                 }
                 .controlSize(.large)
+                if let note = state.previewNote {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -197,8 +203,18 @@ struct RuleEditor: View {
         }
     }
 
+    /// The pasted text stands in for the title and the body (so `title:`, `body:` and bare terms all see it),
+    /// and the rule's own app is the sending app (so `app:` terms work).
+    private var testSample: CapturedNotification {
+        let filter = rule.appFilter?.trimmingCharacters(in: .whitespaces) ?? ""
+        let known = catalog.info(forFilter: filter)
+        let name = known?.name ?? (filter.contains(".") ? "" : filter)
+        let bundle = known?.bundleID ?? (filter.contains(".") ? filter : nil)
+        return makeNotification(appName: name, bundleID: bundle, title: testText, subtitle: "", body: testText)
+    }
+
     @ViewBuilder private var testResult: some View {
-        let sample = makeNotification(appName: rule.appFilter ?? "", title: testText)
+        let sample = testSample
         if let expression = try? QueryExpression(parsing: rule.query) {
             if expression.matches(sample) {
                 Label("Matches this text", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
@@ -395,7 +411,10 @@ private struct AppPickerButton: View {
             }
         }
         .popover(isPresented: $showing, arrowEdge: .bottom) { picker }
-        .task { if apps.isEmpty { apps = state.installedApps() } }
+        .task { apps = state.installedApps() }
+        .onReceive(NotificationCenter.default.publisher(for: InstalledApps.didUpdate)) { _ in
+            apps = state.installedApps()
+        }
     }
 
     private var currentApp: AppInfo? {

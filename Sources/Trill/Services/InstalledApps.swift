@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import TrillCore
 
 /// Scans the installed applications and resolves a banner's app name to a bundle ID.
 /// Thread-safe and cached: the scan runs at most once per `ttl`, and misses trigger a re-scan at most once
@@ -7,58 +8,98 @@ import AppKit
 final class InstalledApps: @unchecked Sendable {
     static let shared = InstalledApps()
 
+    /// Posted on the main queue after a background scan finished and the cache changed.
+    static let didUpdate = Notification.Name("Trill.InstalledApps.didUpdate")
+
     private let lock = NSLock()
     private var apps: [AppInfo] = []
-    private var byName: [String: String] = [:]   // lowercased name -> bundle ID
+    private var byName: [String: String] = [:]   // normalized name -> bundle ID
     private var scannedAt: Date?
     private var lastMissRescan = Date.distantPast
+    private var scanning = false                  // in-flight guard: at most one scan at a time
     private let ttl: TimeInterval = 600
     private let missRescanInterval: TimeInterval = 60
 
-    /// All installed (and running) apps, sorted by name.
+    /// Cached apps, sorted by name; returns immediately (possibly empty before the first scan finishes).
+    /// A missing or stale cache triggers a background refresh, announced by `didUpdate`.
     func all() -> [AppInfo] {
-        refreshIfNeeded(force: false)
-        lock.lock(); defer { lock.unlock() }
-        return apps
+        lock.lock()
+        let stale = scannedAt.map { Date().timeIntervalSince($0) >= ttl } ?? true
+        let result = apps
+        lock.unlock()
+        if stale { refreshInBackground() }
+        return result
     }
 
-    /// Warms the cache; call from a background queue.
-    func warm() { refreshIfNeeded(force: false) }
+    /// Warms the cache synchronously; call from a background queue.
+    func warm() { scan(force: false) }
 
-    /// Bundle ID for an app name as shown on a banner (case-insensitive), or nil.
+    func refreshInBackground() {
+        DispatchQueue.global(qos: .utility).async { [self] in scan(force: false) }
+    }
+
+    /// Bundle ID for an app name as shown on a banner, or nil. Exact (case-insensitive), then without a
+    /// trailing "(...)", then the longest known app name that prefixes it at a word boundary.
+    /// May scan synchronously on a miss: call from a background thread only.
     func bundleID(forName name: String) -> String? {
-        let key = Self.normalize(name)
-        guard !key.isEmpty else { return nil }
-        refreshIfNeeded(force: false)
-        if let id = lookup(key) { return id }
+        guard !AppIdentity.normalize(name).isEmpty else { return nil }
+        scan(force: false)
+        if let id = lookup(name) { return id }
         // Possibly newly installed: re-scan, but not on every miss.
-        lock.lock()
-        let due = Date().timeIntervalSince(lastMissRescan) > missRescanInterval
-        if due { lastMissRescan = Date() }
-        lock.unlock()
-        if due { refreshIfNeeded(force: true); return lookup(key) }
+        if missRescanDue() { scan(force: true); return lookup(name) }
         return nil
     }
 
-    private func lookup(_ key: String) -> String? {
+    /// Like `bundleID(forName:)` but never blocks: cache only; a miss schedules a background re-scan.
+    func cachedBundleID(forName name: String) -> String? {
+        guard !AppIdentity.normalize(name).isEmpty else { return nil }
+        if let id = lookup(name) { return id }
+        if missRescanDue() { DispatchQueue.global(qos: .utility).async { [self] in scan(force: true) } }
+        return nil
+    }
+
+    /// Display names and bundle IDs that denote the same app as `identifier` (a bundle ID or a name).
+    func aliases(for identifier: String) -> [String] {
+        let key = AppIdentity.normalize(identifier)
+        guard !key.isEmpty else { return [] }
         lock.lock(); defer { lock.unlock() }
-        return byName[key]
+        var out: [String] = []
+        for app in apps where app.bundleID.lowercased() == key || AppIdentity.normalize(app.name) == key {
+            out.append(app.bundleID); out.append(app.name)
+        }
+        if out.isEmpty, let id = AppIdentity.resolve(name: identifier, in: byName) {
+            out.append(id)
+            if let app = apps.first(where: { $0.bundleID == id }) { out.append(app.name) }
+        }
+        return out
     }
 
-    private static func normalize(_ s: String) -> String {
-        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    private func missRescanDue() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let due = Date().timeIntervalSince(lastMissRescan) > missRescanInterval
+        if due { lastMissRescan = Date() }
+        return due
     }
 
-    private func refreshIfNeeded(force: Bool) {
+    private func lookup(_ name: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return AppIdentity.resolve(name: name, in: byName)
+    }
+
+    private func scan(force: Bool) {
         lock.lock()
         let fresh = !force && scannedAt.map { Date().timeIntervalSince($0) < ttl } == true
+        if fresh || scanning { lock.unlock(); return }
+        scanning = true
         lock.unlock()
-        if fresh { return }
         let (list, names) = Self.scan()
         lock.lock()
-        apps = list; byName = names; scannedAt = Date()
+        apps = list; byName = names; scannedAt = Date(); scanning = false
         lock.unlock()
+        DispatchQueue.main.async { NotificationCenter.default.post(name: Self.didUpdate, object: nil) }
     }
+
+    private static func normalize(_ s: String) -> String { AppIdentity.normalize(s) }
 
     private static func scan() -> ([AppInfo], [String: String]) {
         var byID: [String: AppInfo] = [:]

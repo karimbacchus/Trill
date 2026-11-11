@@ -147,7 +147,8 @@ struct RulesView: View {
         let rule = Rule(id: UUID(), name: "New Rule", isEnabled: true, appFilter: nil, query: "",
                         action: .sound(soundID: state.soundID(preferring: ["system:Glass", "builtin:chime-up"])),
                         volume: 1.0)
-        state.rules.append(rule)
+        // Most specific first: a new rule goes to the top so it is not shadowed by earlier, broader ones.
+        state.rules.insert(rule, at: 0)
         router.selectedRuleID = rule.id
     }
 

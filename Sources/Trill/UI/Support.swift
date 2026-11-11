@@ -103,12 +103,18 @@ extension AppState {
 final class AppCatalog: ObservableObject {
     static let shared = AppCatalog()
     @Published private(set) var apps: [AppInfo] = []
-    private var loaded = false
+    private var observer: NSObjectProtocol?
 
+    /// Shows whatever is cached right away; the scan itself runs in the background and the list updates
+    /// when it finishes.
     func loadIfNeeded() {
-        guard !loaded else { return }
-        loaded = true
-        apps = AppState.shared.installedApps()
+        if observer == nil {
+            observer = NotificationCenter.default.addObserver(forName: InstalledApps.didUpdate, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.apps = AppState.shared.installedApps() }
+            }
+        }
+        let cached = AppState.shared.installedApps()
+        if cached != apps { apps = cached }
     }
 
     /// Resolves a rule's app filter (bundle ID or display name) to an installed app.

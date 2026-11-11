@@ -63,9 +63,11 @@ public struct Rule: Identifiable, Codable, Hashable, Sendable {
         id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         isEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .isEnabled)) ?? true
-        appFilter = try? c.decodeIfPresent(String.self, forKey: .appFilter)
-        query = (try? c.decodeIfPresent(String.self, forKey: .query)) ?? ""
-        action = (try? c.decodeIfPresent(RuleAction.self, forKey: .action)) ?? .silent
+        // These three decide what a rule matches and does. A value that is present but unreadable must not
+        // quietly become "any app", "" or "silent": throw, and the Store skips that one rule (keeping a backup).
+        appFilter = try c.decodeIfPresent(String.self, forKey: .appFilter)
+        query = try c.decodeIfPresent(String.self, forKey: .query) ?? ""
+        action = try c.decodeIfPresent(RuleAction.self, forKey: .action) ?? .silent
         volume = (try? c.decodeIfPresent(Double.self, forKey: .volume)) ?? 1.0
     }
 }
@@ -89,14 +91,20 @@ public enum Appearance: String, Codable, CaseIterable, Sendable { case system, l
 public struct AppSettings: Codable, Hashable, Sendable {
     public var appearance: Appearance
     public var isPaused: Bool
+    /// Turn off an app's own macOS notification sound when Trill plays a sound for it.
+    public var muteAppOwnSounds: Bool
+    /// Bundle IDs whose macOS notification sound Trill turned off (so it can turn it back on).
+    public var mutedBundleIDs: [String]
 
-    public init() { appearance = .system; isPaused = false }
+    public init() { appearance = .system; isPaused = false; muteAppOwnSounds = true; mutedBundleIDs = [] }
 
-    enum CodingKeys: String, CodingKey { case appearance, isPaused }
+    enum CodingKeys: String, CodingKey { case appearance, isPaused, muteAppOwnSounds, mutedBundleIDs }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         appearance = (try? c.decodeIfPresent(Appearance.self, forKey: .appearance)) ?? .system
         isPaused = (try? c.decodeIfPresent(Bool.self, forKey: .isPaused)) ?? false
+        muteAppOwnSounds = (try? c.decodeIfPresent(Bool.self, forKey: .muteAppOwnSounds)) ?? true
+        mutedBundleIDs = (try? c.decodeIfPresent([String].self, forKey: .mutedBundleIDs)) ?? []
     }
 }

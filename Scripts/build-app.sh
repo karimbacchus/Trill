@@ -21,8 +21,13 @@ if [ -n "$SDKVER" ]; then
     EXTRA+=(-Xlinker -platform_version -Xlinker macos -Xlinker 13.0 -Xlinker "$SDKVER")
 fi
 
-swift build -c release ${EXTRA[@]+"${EXTRA[@]}"}
-BIN="$(swift build -c release --show-bin-path)/Trill"
+# Universal binary (arm64 + x86_64) in one SwiftPM invocation; the linker flags above apply to both slices.
+# Set TRILL_ARCHS="arm64" to build for this Mac's architecture only.
+ARCHS=()
+for a in ${TRILL_ARCHS:-arm64 x86_64}; do ARCHS+=(--arch "$a"); done
+
+swift build -c release "${ARCHS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+BIN="$(swift build -c release "${ARCHS[@]}" --show-bin-path)/Trill"
 
 APP="$ROOT/build/Trill.app"
 rm -rf "$APP"

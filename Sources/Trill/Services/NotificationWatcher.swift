@@ -11,6 +11,9 @@ final class NotificationWatcher: @unchecked Sendable {
     /// Called on the watcher thread. Hop to the main actor yourself.
     var onNotification: (@Sendable (CapturedNotification) -> Void)?
     var onStatus: (@Sendable (String) -> Void)?
+    /// Called on the watcher thread when a new candidate banner is first seen (before the stability delay),
+    /// so audio can be warmed up in the meantime.
+    var onPending: (@Sendable () -> Void)?
 
     private let lock = NSLock()
     private var thread: Thread?
@@ -25,11 +28,19 @@ final class NotificationWatcher: @unchecked Sendable {
     private var shown: [String: Date] = [:]          // fired (or baseline) banners -> last time seen
     private var pending: [String: Date] = [:]        // candidate banners -> first time seen (needs to be stable)
     private var scanScheduled = false
+    private var lastScanAt = Date.distantPast
     private var lastStatus = ""
     private var lastShape = "no banners seen yet"
 
     private static let stableDelay: TimeInterval = 0.25
     private static let shownTTL: TimeInterval = 2.5
+    /// Scans are at least this far apart (a ticking widget can fire AX notifications many times a second).
+    private static let minScanInterval: TimeInterval = 0.2
+    /// Finding this many new banners in a single scan means history was revealed (e.g. the Notification
+    /// Center panel was opened): treat them as already seen.
+    private static let historyBatchSize = 3
+    /// Nodes visited per window when looking for banner elements.
+    private static let nodeBudget = 400
 
     // MARK: Lifecycle
 
@@ -145,9 +156,13 @@ final class NotificationWatcher: @unchecked Sendable {
         registeredWindows.removeAll()
     }
 
+    /// Schedules one scan, never sooner than `minScanInterval` after the previous one. Requests that arrive while
+    /// one is pending are folded into it, so the trailing scan is never lost.
     private func scheduleScan(after delay: TimeInterval) {
         guard !scanScheduled else { return }
         scanScheduled = true
+        let sinceLast = Date().timeIntervalSince(lastScanAt)
+        let delay = max(delay, Self.minScanInterval - sinceLast)
         let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
             self?.scanScheduled = false
             self?.scan(suppress: false)
@@ -169,7 +184,7 @@ final class NotificationWatcher: @unchecked Sendable {
     }
 
     private func registerWindow(_ w: AXUIElement) {
-        guard let obs = observer else { return }
+        guard let obs = observer, !Self.looksLikeWidgetWindow(w) else { return }
         let h = CFHash(w)
         guard !registeredWindows.contains(h) else { return }
         registeredWindows.insert(h)
@@ -182,14 +197,18 @@ final class NotificationWatcher: @unchecked Sendable {
     private func scan(suppress: Bool) {
         guard let app = appElement else { return }
         let now = Date()
+        lastScanAt = now
         var candidates: [Candidate] = []
         var usedHeuristic = false
         let windows = topLevel(app)
         for w in windows {
+            // Desktop widgets live in this process too; they are never banners and can tick constantly.
+            if Self.looksLikeWidgetWindow(w) { continue }
             registerWindow(w)
             var found: [Candidate] = []
-            Self.findBySubrole(w, depth: 0, into: &found)
-            if found.isEmpty && !Self.looksLikeWidgetWindow(w) {
+            var budget = Self.nodeBudget
+            Self.findBySubrole(w, depth: 0, budget: &budget, into: &found)
+            if found.isEmpty {
                 var heur: [AXUIElement] = []
                 Self.findHeuristic(w, depth: 0, into: &heur)
                 found = heur.map { Candidate(element: $0, via: "heuristic") }
@@ -201,6 +220,7 @@ final class NotificationWatcher: @unchecked Sendable {
         var occurrences: [String: Int] = [:]
         var seenKeys = Set<String>()
         var extractedCount = 0
+        var extracted: [(key: String, note: CapturedNotification)] = []
         for c in candidates {
             guard let n = Self.extract(from: c.element) else { continue }
             extractedCount += 1
@@ -209,9 +229,16 @@ final class NotificationWatcher: @unchecked Sendable {
             occurrences[sig] = idx + 1
             let key = "\(sig)#\(idx)"
             seenKeys.insert(key)
+            extracted.append((key, n))
+        }
+
+        // Many unseen banners at once is the Notification Center panel showing old notifications: baseline them.
+        let unseen = extracted.filter { shown[$0.key] == nil && pending[$0.key] == nil }
+        let baselineBatch = !suppress && unseen.count >= Self.historyBatchSize
+        for (key, n) in extracted {
             if shown[key] != nil {
                 shown[key] = now
-            } else if suppress {
+            } else if suppress || baselineBatch {
                 shown[key] = now
             } else if let first = pending[key] {
                 if now.timeIntervalSince(first) >= Self.stableDelay {
@@ -223,6 +250,7 @@ final class NotificationWatcher: @unchecked Sendable {
                 }
             } else {
                 pending[key] = now
+                onPending?()
                 scheduleScan(after: Self.stableDelay)
             }
         }
@@ -246,20 +274,26 @@ final class NotificationWatcher: @unchecked Sendable {
         let sub = AX.subrole(el).lowercased()
         if sub.contains("banner") || sub.contains("alert") || sub.contains("notificationcenter") { return true }
         for attr in ["AXStackingIdentifier", "AXIdentifier"] {
-            if let s = AX.string(el, attr)?.lowercased(), !s.isEmpty {
-                if s.contains("bundleidentifier=") || s.contains("banner") || s.contains("notification") { return true }
+            guard let s = AX.string(el, attr)?.lowercased(), !s.isEmpty else { continue }
+            if s.contains("bundleidentifier=") || s.contains("banner") { return true }
+            // A bare "notification…" identifier counts only on a container, never on a leaf or control
+            // (a widget's "notification count" label is not a banner).
+            if s.hasPrefix("notification") || s.hasPrefix("nc.notification") {
+                let role = AX.role(el)
+                if role == "AXGroup" || role == "AXScrollArea" || role == "AXList" || role == "AXUnknown" { return true }
             }
         }
         return false
     }
 
-    private static func findBySubrole(_ el: AXUIElement, depth: Int, into out: inout [Candidate]) {
-        if depth > 12 { return }
+    private static func findBySubrole(_ el: AXUIElement, depth: Int, budget: inout Int, into out: inout [Candidate]) {
+        if depth > 12 || budget <= 0 { return }
+        budget -= 1
         if depth > 0, isBannerNode(el) {
             out.append(Candidate(element: el, via: "subrole"))
             return
         }
-        for c in AX.children(el) { findBySubrole(c, depth: depth + 1, into: &out) }
+        for c in AX.children(el) { findBySubrole(c, depth: depth + 1, budget: &budget, into: &out) }
     }
 
     /// Notification Center keeps desktop widget windows in this process; never treat those as banners.

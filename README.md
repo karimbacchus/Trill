@@ -42,10 +42,17 @@ on rules you write: per app, channel, person or keyword.
 3. Trill lives in the menu bar (waveform icon, no Dock icon). Click **Grant** in the Rules window and
    enable Trill under System Settings → Privacy & Security → Accessibility. This is how it reads
    notification banners.
-4. Pick a sound for each app under **App sounds**. Trill plays its sound on top of the app's own, so to
-   hear only Trill's, turn the app's notification sound off in System Settings → Notifications.
+4. Pick a sound for each app under **App sounds**.
 
-Requires macOS 13 or later. Built and tested on macOS 27, Apple Silicon.
+**The app's own sound.** When you give an app a Trill sound, Trill turns off that app's "Play sound for
+notification" setting in macOS so you don't hear both, and turns it back on if you remove the sound.
+There is no public API for this: Trill edits the macOS notification preferences (after backing them up
+to `~/Library/Application Support/Trill/Backups`) and briefly restarts the notification service. It is
+unsupported by Apple and may stop working in a future macOS; you can switch it off in Settings and
+change the setting by hand under System Settings → Notifications. Some apps, such as Slack and Discord,
+play their notification sound themselves; turn that off in the app's own preferences.
+
+Requires macOS 13 or later, Apple Silicon or Intel. Built and tested on macOS 27, Apple Silicon.
 
 ## Writing rules
 
@@ -66,7 +73,8 @@ the title, subtitle and body. The editor validates the query as you type and has
 field.
 
 Banners carry the app's display name but no bundle identifier, so Trill resolves the name against your
-installed apps. A rule's app filter can be either the name ("Slack") or the bundle ID.
+installed apps. A rule's app filter can be either the name ("Slack") or the bundle ID, and suffixed banner names such as
+"Microsoft Teams (work or school)" still match.
 
 ## Build from source
 

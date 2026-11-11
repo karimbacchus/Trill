@@ -42,5 +42,26 @@ run("RuleEngine", [
 run("Store", [
     ("roundTrip", StoreTests.testRoundTrip), ("corruptAndTolerant", StoreTests.testCorruptAndTolerantDecoding),
 ])
+run("AppIdentity", [
+    ("stripAndPrefix", AppIdentityTests.testStripAndPrefix), ("resolveTable", AppIdentityTests.testResolveTable),
+    ("nameFilterSuffixed", AppIdentityTests.testNameFilterMatchesSuffixedBanner),
+    ("bundleFilterAliases", AppIdentityTests.testBundleFilterMatchesNameOnlyBannerViaAliases),
+    ("alternateBundleID", AppIdentityTests.testAlternateBundleIDViaAliases),
+    ("firstMatchAliases", AppIdentityTests.testFirstMatchUsesAliases),
+    ("defaultInsertionIndex", AppIdentityTests.testDefaultInsertionIndex),
+])
+run("Gain", [
+    ("unity", GainTests.testUnityIsUntouched), ("headroom", GainTests.testHeadroomScale),
+    ("quietLinear", GainTests.testQuietSoundBoostIsLinear), ("softClip", GainTests.testSoftClipShape),
+    ("loudBounded", GainTests.testLoudBoostIsLouderThanHardClipAndBounded),
+])
+run("StoreSafety", [
+    ("quarantine", StoreSafetyTests.testGarbageFileIsQuarantinedNotDestroyed),
+    ("missingNotCorrupt", StoreSafetyTests.testMissingFileIsNotCorrupt),
+    ("badRuleIsolated", StoreSafetyTests.testOneBadRuleDoesNotDropTheRest),
+    ("badActionThrows", StoreSafetyTests.testBadActionIsNotSilentlySilent),
+    ("backup", StoreSafetyTests.testBackupOfPreviousContents),
+    ("corruptSettings", StoreSafetyTests.testCorruptSettingsQuarantined),
+])
 print("\(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)

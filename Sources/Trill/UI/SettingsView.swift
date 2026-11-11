@@ -71,6 +71,10 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Pause all rules", isOn: $state.settings.isPaused)
+                Toggle("Turn off apps' own sounds", isOn: $state.settings.muteAppOwnSounds)
+                Text("When you give an app a sound, Trill switches off that app's \"Play sound for notification\" setting so you only hear Trill's, and switches it back on if you remove the sound. This edits macOS's notification preferences and briefly restarts the notification service, which Apple does not officially support, so it may stop working in a future macOS.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 LabeledContent("Apps' own sounds") {
                     Button("Open Notification Settings…") { SystemLinks.openNotificationSettings() }
                 }

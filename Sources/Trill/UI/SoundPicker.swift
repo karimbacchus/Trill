@@ -5,6 +5,8 @@ import TrillCore
 struct SoundPickerSheet: View {
     @Binding var selection: String
     let volume: Double
+    /// Called when the user presses Done (not when the sheet is dismissed another way).
+    var onDone: (() -> Void)? = nil
 
     @ObservedObject private var state = AppState.shared
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +16,7 @@ struct SoundPickerSheet: View {
     @State private var showImporter = false
     @State private var showTextToSound = false
     @State private var errorMessage: String?
+    @State private var soundToDelete: Sound?
 
     private struct SoundSection: Identifiable {
         let title: String
@@ -88,6 +91,14 @@ struct SoundPickerSheet: View {
         .sheet(isPresented: $showTextToSound) {
             TextToSoundSheet { sound in selection = sound.id }
         }
+        .alert("Delete this sound?", isPresented: Binding(get: { soundToDelete != nil },
+                                                           set: { if !$0 { soundToDelete = nil } }),
+               presenting: soundToDelete) { sound in
+            Button("Delete", role: .destructive) { delete(sound) }
+            Button("Cancel", role: .cancel) {}
+        } message: { sound in
+            Text(deleteMessage(for: sound))
+        }
     }
 
     // MARK: Chrome
@@ -132,7 +143,7 @@ struct SoundPickerSheet: View {
                 Spacer()
                 Button("Stop") { state.stopPreview() }
                     .glassButton()
-                Button("Done") { state.stopPreview(); dismiss() }
+                Button("Done") { state.stopPreview(); onDone?(); dismiss() }
                     .glassButton(prominent: true)
                     .keyboardShortcut(.defaultAction)
             }
@@ -206,7 +217,7 @@ struct SoundPickerSheet: View {
             Spacer()
             if sound.kind == .user {
                 Button {
-                    delete(sound)
+                    soundToDelete = sound
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -221,10 +232,21 @@ struct SoundPickerSheet: View {
         .contentShape(Rectangle())
     }
 
+    private func deleteMessage(for sound: Sound) -> String {
+        let used = state.rules(using: sound).count
+        var text = "“\(sound.name)” will be removed from your library."
+        if used > 0 {
+            let fallback = state.fallbackSound(excluding: sound.id)?.name ?? "a system sound"
+            text += " \(used == 1 ? "1 rule uses" : "\(used) rules use") it and will switch to \(fallback)."
+        }
+        return text
+    }
+
     private func delete(_ sound: Sound) {
+        let fallback = state.fallbackSound(excluding: sound.id)
         state.deleteSound(sound)
         if selection == sound.id {
-            selection = state.soundID(preferring: ["system:Glass"])
+            selection = fallback?.id ?? state.soundID(preferring: ["system:Glass"])
         }
     }
 
