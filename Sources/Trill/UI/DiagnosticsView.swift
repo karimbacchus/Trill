@@ -14,25 +14,51 @@ struct DiagnosticsView: View {
     @State private var copied = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            statusSection
-            Divider()
+        VStack(spacing: 14) {
+            statusCard
             logSection
-            Divider()
-            testSection
         }
-        .frame(minWidth: 760, minHeight: 540)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            testSection
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+                .padding(.top, 6)
+        }
+        .frame(minWidth: 780, minHeight: 560)
+        .navigationTitle("Diagnostics")
+        .toolbar {
+            ToolbarItemGroup {
+                Button {
+                    createRule(from: selectedEntries.first)
+                } label: {
+                    Label("Create Rule for This", systemImage: "plus.circle")
+                }
+                .disabled(selectedEntries.isEmpty)
+                .help("Create a rule from the selected notification")
+                Button {
+                    state.clearLog()
+                    selection.removeAll()
+                } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+                .disabled(state.log.isEmpty)
+                .help("Clear the list")
+            }
+        }
     }
 
     // MARK: Status
 
-    private var statusSection: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: state.isAccessibilityTrusted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(state.isAccessibilityTrusted ? Color.green : Color.orange)
+    private var statusCard: some View {
+        let ok = state.isAccessibilityTrusted
+        return HStack(alignment: .center, spacing: 14) {
+            Image(systemName: ok ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(ok ? Color.green : Color.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text(state.isAccessibilityTrusted ? "Accessibility access granted" : "Accessibility access not granted")
+                Text(ok ? "Accessibility access granted" : "Accessibility access not granted")
                     .font(.headline)
                 Text(state.watcherStatus)
                     .font(.callout)
@@ -40,9 +66,9 @@ struct DiagnosticsView: View {
                     .textSelection(.enabled)
             }
             Spacer()
-            if !state.isAccessibilityTrusted {
+            if !ok {
                 Button("Grant Access…") { state.requestAccessibilityPermission() }
-                    .buttonStyle(.borderedProminent)
+                    .glassButton(prominent: true)
             }
             Button {
                 let dump = state.accessibilityDump()
@@ -53,62 +79,62 @@ struct DiagnosticsView: View {
             } label: {
                 Label(copied ? "Copied" : "Copy AX Dump", systemImage: copied ? "checkmark" : "doc.on.clipboard")
             }
+            .glassButton()
             .help("Copy a text dump of the notification UI's accessibility tree, for bug reports")
         }
         .padding(14)
+        .background((ok ? Color.green : Color.orange).opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder((ok ? Color.green : Color.orange).opacity(0.25)))
     }
 
     // MARK: Log
 
     private var logSection: some View {
-        VStack(spacing: 0) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
                 Text("Captured notifications").font(.headline)
-                Text("(\(state.log.count))").foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    createRule(from: selectedEntries.first)
-                } label: {
-                    Label("Create Rule for This", systemImage: "plus.circle")
-                }
-                .disabled(selectedEntries.isEmpty)
-                Button {
-                    state.clearLog()
-                    selection.removeAll()
-                } label: {
-                    Label("Clear", systemImage: "trash")
-                }
-                .disabled(state.log.isEmpty)
+                Text("\(state.log.count)")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.08), in: Capsule())
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
 
             Table(state.log, selection: $selection) {
                 TableColumn("Time") { entry in
-                    Text(entry.notification.date, style: .time).monospacedDigit()
+                    Text(entry.notification.date, style: .time).monospacedDigit().foregroundStyle(.secondary)
                 }
                 .width(min: 60, ideal: 80, max: 100)
                 TableColumn("App") { entry in
-                    Text(appLabel(entry.notification))
+                    HStack(spacing: 6) {
+                        AppIconView(image: AppIcons.icon(forBundleID: entry.notification.bundleID ?? ""), size: 18)
+                        Text(appLabel(entry.notification))
+                    }
                 }
-                .width(min: 80, ideal: 120)
+                .width(min: 100, ideal: 140)
                 TableColumn("Title") { entry in
-                    Text(entry.notification.title)
+                    Text(entry.notification.title).fontWeight(.medium)
                 }
                 .width(min: 100, ideal: 160)
                 TableColumn("Body") { entry in
-                    Text(entry.notification.body)
+                    Text(entry.notification.body).foregroundStyle(.secondary)
                 }
                 TableColumn("Matched rule") { entry in
                     if let name = entry.matchedRuleName {
                         Label(name, systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.green)
+                            .labelStyle(.titleAndIcon)
                     } else {
-                        Text("No match").foregroundStyle(.secondary)
+                        Text("No match").foregroundStyle(.tertiary)
                     }
                 }
-                .width(min: 100, ideal: 140)
+                .width(min: 120, ideal: 160)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
             .contextMenu(forSelectionType: LogEntry.ID.self) { ids in
                 if let entry = state.log.first(where: { ids.contains($0.id) }) {
                     Button("Create Rule for This") { createRule(from: entry) }
@@ -163,11 +189,26 @@ struct DiagnosticsView: View {
 
     // MARK: Test form
 
+    /// Floating glass panel pinned to the bottom of the window.
     private var testSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Send test notification").font(.headline)
-            Text("Feeds a fake notification straight into the rule engine, bypassing Accessibility.")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Send test notification").font(.headline)
+                    Text("Feeds a fake notification straight into the rule engine, bypassing Accessibility.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    state.sendTestNotification(
+                        makeNotification(appName: testApp, bundleID: nil, title: testTitle,
+                                         subtitle: testSubtitle, body: testBody))
+                } label: {
+                    Label("Send", systemImage: "paperplane.fill")
+                }
+                .glassButton(prominent: true)
+                .controlSize(.large)
+            }
             HStack(spacing: 8) {
                 TextField("App", text: $testApp).frame(width: 130)
                 TextField("Title", text: $testTitle)
@@ -175,17 +216,8 @@ struct DiagnosticsView: View {
                 TextField("Body", text: $testBody)
             }
             .textFieldStyle(.roundedBorder)
-            HStack {
-                Spacer()
-                Button {
-                    state.sendTestNotification(
-                        makeNotification(appName: testApp, bundleID: nil, title: testTitle,
-                                         subtitle: testSubtitle, body: testBody))
-                } label: {
-                    Label("Send Test Notification", systemImage: "paperplane.fill")
-                }
-            }
         }
         .padding(14)
+        .glassCard(cornerRadius: 20)
     }
 }

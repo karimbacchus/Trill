@@ -76,9 +76,11 @@ public struct Sound: Identifiable, Codable, Hashable, Sendable {
     public var name: String
     public var kind: Kind
     public var url: URL
+    /// Display group for sounds that ship in a named pack (e.g. "Kenney Interface"); nil otherwise.
+    public var group: String?
 
-    public init(id: String, name: String, kind: Kind, url: URL) {
-        self.id = id; self.name = name; self.kind = kind; self.url = url
+    public init(id: String, name: String, kind: Kind, url: URL, group: String? = nil) {
+        self.id = id; self.name = name; self.kind = kind; self.url = url; self.group = group
     }
 }
 

@@ -1,24 +1,32 @@
 import SwiftUI
 import TrillCore
 
+private enum SidebarItem: Hashable {
+    case appSounds
+    case rule(UUID)
+}
+
 struct RulesView: View {
     @ObservedObject private var state = AppState.shared
     @ObservedObject private var router = UIRouter.shared
+    @ObservedObject private var catalog = AppCatalog.shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !state.isAccessibilityTrusted {
-                OnboardingCard()
-                Divider()
-            }
-            NavigationSplitView {
-                sidebar
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 290, max: 380)
-            } detail: {
-                detail
-            }
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 400)
+        } detail: {
+            detail
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if !state.isAccessibilityTrusted {
+                        OnboardingCard()
+                            .padding([.horizontal, .top], 16)
+                            .padding(.bottom, 4)
+                    }
+                }
         }
-        .frame(minWidth: 820, minHeight: 520)
+        .frame(minWidth: 860, minHeight: 540)
+        .task { catalog.loadIfNeeded() }
         .toolbar {
             ToolbarItemGroup {
                 Button(action: addRule) { Label("New Rule", systemImage: "plus") }
@@ -36,49 +44,86 @@ struct RulesView: View {
 
     // MARK: Sidebar
 
-    private var sidebar: some View {
-        List(selection: $router.selectedRuleID) {
-            ForEach($state.rules) { $rule in
-                RuleRow(rule: $rule)
-                    .contextMenu {
-                        Button("Duplicate") { duplicate(id: rule.id) }
-                        Button(rule.isEnabled ? "Disable" : "Enable") { rule.isEnabled.toggle() }
-                        Divider()
-                        Button("Delete", role: .destructive) { delete(id: rule.id) }
-                    }
+    private var selection: Binding<SidebarItem?> {
+        Binding(
+            get: {
+                if router.showAppSounds { return .appSounds }
+                return router.selectedRuleID.map { .rule($0) }
+            },
+            set: { new in
+                switch new {
+                case .appSounds?: router.selectedRuleID = nil; router.showAppSounds = true
+                case .rule(let id)?: router.selectedRuleID = id
+                case nil: break
+                }
             }
-            .onMove { state.rules.move(fromOffsets: $0, toOffset: $1) }
-            .onDelete { state.rules.remove(atOffsets: $0) }
+        )
+    }
+
+    private var sidebar: some View {
+        List(selection: selection) {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "bell.badge.waveform.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(LinearGradient(colors: [.pink, .orange], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("App sounds").fontWeight(.semibold)
+                        Text("One sound per app").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 3)
+                .tag(SidebarItem.appSounds)
+            }
+
+            Section("Rules") {
+                ForEach($state.rules) { $rule in
+                    RuleRow(rule: $rule)
+                        .tag(SidebarItem.rule(rule.id))
+                        .contextMenu {
+                            Button("Duplicate") { duplicate(id: rule.id) }
+                            Button(rule.isEnabled ? "Disable" : "Enable") { rule.isEnabled.toggle() }
+                            Divider()
+                            Button("Delete", role: .destructive) { delete(id: rule.id) }
+                        }
+                }
+                .onMove { state.rules.move(fromOffsets: $0, toOffset: $1) }
+                .onDelete { state.rules.remove(atOffsets: $0) }
+
+                if state.rules.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No rules yet").foregroundStyle(.secondary)
+                        Button("Add Example Rules", action: addExamples).controlSize(.small)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
         }
         .onDeleteCommand(perform: deleteSelected)
-        .overlay {
-            if state.rules.isEmpty {
-                Text("No rules yet")
-                    .foregroundStyle(.secondary)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button(action: addRule) {
+                Label("New Rule", systemImage: "plus")
+                    .frame(maxWidth: .infinity)
             }
+            .glassButton()
+            .controlSize(.large)
+            .padding(12)
         }
     }
 
     // MARK: Detail
 
     @ViewBuilder private var detail: some View {
-        if let id = router.selectedRuleID, state.rules.contains(where: { $0.id == id }) {
+        if router.showAppSounds || router.selectedRuleID == nil {
+            AppSoundsView()
+        } else if let id = router.selectedRuleID, state.rules.contains(where: { $0.id == id }) {
             RuleEditor(rule: binding(for: id))
                 .id(id)
-        } else if state.rules.isEmpty {
-            EmptyRulesView(addRule: addRule, addExamples: addExamples)
         } else {
-            VStack(spacing: 8) {
-                Image(systemName: "list.bullet.rectangle")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.tertiary)
-                Text("Select a rule to edit it")
-                    .foregroundStyle(.secondary)
-                Text("Rules are checked from top to bottom; the first match wins.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            AppSoundsView()
         }
     }
 
@@ -159,48 +204,43 @@ extension Rule {
 private struct RuleRow: View {
     @Binding var rule: Rule
     @ObservedObject private var state = AppState.shared
+    @ObservedObject private var catalog = AppCatalog.shared
+
+    private var matchSummary: String {
+        let query = rule.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let app = rule.appFilter.map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
+        switch (app, query.isEmpty) {
+        case (let a?, true): return "\(catalog.displayName(forFilter: a)) · everything"
+        case (let a?, false): return "\(catalog.displayName(forFilter: a)) · \(query)"
+        case (nil, true): return "Any app · everything"
+        case (nil, false): return "Any app · \(query)"
+        }
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Toggle("Enabled", isOn: $rule.isEnabled)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 10) {
+            AppIconView(image: catalog.icon(forFilter: rule.appFilter), size: 30)
+                .opacity(rule.isEnabled ? 1 : 0.4)
+            VStack(alignment: .leading, spacing: 1) {
                 Text(rule.name.isEmpty ? "Untitled Rule" : rule.name)
+                    .fontWeight(.medium)
                     .lineLimit(1)
-                Label(state.summary(of: rule.action), systemImage: rule.action.kind.symbol)
+                Text(matchSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                Label(state.summary(of: rule.action), systemImage: rule.action.kind.symbol)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
             .opacity(rule.isEnabled ? 1 : 0.5)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-private struct EmptyRulesView: View {
-    let addRule: () -> Void
-    let addExamples: () -> Void
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "waveform.circle")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("No rules yet").font(.title2)
-            Text("A rule picks a sound (or speech, or a Shortcut) for notifications that match an app and a query.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 360)
-            HStack {
-                Button("New Rule", action: addRule)
-                Button("Add Example Rules", action: addExamples)
+            Spacer(minLength: 0)
+            if !rule.isEnabled {
+                Image(systemName: "pause.circle").foregroundStyle(.tertiary).help("Disabled")
             }
-            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 3)
     }
 }
 
@@ -208,27 +248,24 @@ struct OnboardingCard: View {
     @ObservedObject private var state = AppState.shared
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .center, spacing: 14) {
             Image(systemName: "hand.raised.fill")
-                .font(.system(size: 26))
+                .font(.system(size: 24))
                 .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Trill needs Accessibility access")
                     .font(.headline)
-                Text("To notice notification banners, Trill reads the on-screen text of the notification UI through the macOS Accessibility API. Everything is processed locally on this Mac; nothing is sent anywhere.")
+                Text("Trill reads the on-screen text of notification banners through the Accessibility API. Everything stays on this Mac. This banner disappears once access is granted.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("After enabling Trill in System Settings, this banner disappears on its own.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 12)
             Button("Grant Access…") { state.requestAccessibilityPermission() }
-                .buttonStyle(.borderedProminent)
+                .glassButton(prominent: true)
                 .controlSize(.large)
         }
         .padding(14)
-        .background(Color.accentColor.opacity(0.10))
+        .glassCard(cornerRadius: 18, tint: Color.accentColor.opacity(0.12))
     }
 }

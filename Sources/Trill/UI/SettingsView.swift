@@ -10,6 +10,41 @@ struct SettingsView: View {
     private var isAppBundle: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
     var body: some View {
+        VStack(spacing: 0) {
+            hero
+            form
+        }
+        .frame(width: 480, height: 560)
+        .onAppear { refreshLogin() }
+    }
+
+    private var hero: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "waveform")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(LinearGradient(colors: [.pink, .orange], startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Trill").font(.title2.weight(.semibold))
+                Text("Give every notification its own sound.").foregroundStyle(.secondary)
+            }
+            Spacer()
+            if state.settings.isPaused {
+                Label("Paused", systemImage: "pause.fill")
+                    .font(.callout.weight(.medium))
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.orange.opacity(0.18), in: Capsule())
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 20)
+        .padding(.bottom, 4)
+    }
+
+    private var form: some View {
         Form {
             Section("Appearance") {
                 Picker("Theme", selection: $state.settings.appearance) {
@@ -36,6 +71,9 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Pause all rules", isOn: $state.settings.isPaused)
+                LabeledContent("Apps' own sounds") {
+                    Button("Open Notification Settings…") { SystemLinks.openNotificationSettings() }
+                }
             } header: {
                 Text("Notifications")
             } footer: {
@@ -53,8 +91,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 440)
-        .onAppear { refreshLogin() }
     }
 
     private var launchBinding: Binding<Bool> {

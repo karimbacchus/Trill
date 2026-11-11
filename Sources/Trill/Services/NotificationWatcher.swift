@@ -383,6 +383,7 @@ final class NotificationWatcher: @unchecked Sendable {
         if let a = appName, texts.count >= 2, texts[0] == a { texts.removeFirst() }
         if bundleID == nil, let a = appName {
             bundleID = NSWorkspace.shared.runningApplications.first { $0.localizedName == a }?.bundleIdentifier
+                ?? InstalledApps.shared.bundleID(forName: a)
         }
 
         var title = texts[0]

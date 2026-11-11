@@ -4,75 +4,169 @@ import TrillCore
 struct RuleEditor: View {
     @Binding var rule: Rule
     @ObservedObject private var state = AppState.shared
+    @ObservedObject private var catalog = AppCatalog.shared
+    @ObservedObject private var router = UIRouter.shared
 
     @State private var testText = ""
     @State private var showSyntaxHelp = false
     @State private var showSoundPicker = false
     @State private var shortcutNames: [String] = []
+    @FocusState private var queryFocused: Bool
 
     var body: some View {
-        Form {
-            Section("Rule") {
-                TextField("Name", text: $rule.name)
-                LabeledContent("App") {
-                    AppPickerButton(filter: $rule.appFilter)
-                }
-                Toggle("Enabled", isOn: $rule.isEnabled)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                matchCard
+                actionCard
             }
-
-            Section {
-                queryField
-                queryStatus
-                TextField("Test against text", text: $testText,
-                          prompt: Text("Paste a notification's text to try the query"))
-                if !testText.isEmpty { testResult }
-            } header: {
-                Text("Match")
-            } footer: {
-                Text("Leave the query empty to match every notification from the chosen app.")
-            }
-
-            Section("Action") {
-                Picker("Action", selection: kindBinding) {
-                    ForEach(ActionKind.allCases) { kind in
-                        Text(kind.title).tag(kind)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                actionEditor
-            }
-
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if rule.action.kind != .silent {
-                Section("Playback") {
-                    volumeRow
-                    HStack {
-                        Button {
-                            state.preview(action: rule.action, volume: rule.volume, sample: nil)
-                        } label: {
-                            Label("Preview", systemImage: "play.fill")
-                        }
-                        Button {
-                            state.stopPreview()
-                        } label: {
-                            Label("Stop", systemImage: "stop.fill")
-                        }
-                    }
-                }
+                playbackBar
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 14)
+                    .padding(.top, 6)
             }
         }
-        .formStyle(.grouped)
         .navigationTitle(rule.name.isEmpty ? "Rule" : rule.name)
+        .task { catalog.loadIfNeeded() }
+        .onAppear {
+            if router.focusQueryRuleID == rule.id {
+                router.focusQueryRuleID = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { queryFocused = true }
+            }
+        }
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 14) {
+            AppIconView(image: catalog.icon(forFilter: rule.appFilter), size: 52)
+                .opacity(rule.isEnabled ? 1 : 0.45)
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Rule name", text: $rule.name, prompt: Text("Untitled Rule"))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 22, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text("For notifications from").foregroundStyle(.secondary)
+                    AppPickerButton(filter: $rule.appFilter)
+                }
+                .font(.callout)
+            }
+            Spacer(minLength: 12)
+            Toggle(isOn: $rule.isEnabled) { Text(rule.isEnabled ? "On" : "Off") }
+                .toggleStyle(.switch)
+                .help(rule.isEnabled ? "Turn this rule off" : "Turn this rule on")
+        }
+    }
+
+    // MARK: Cards
+
+    private func cardTitle(_ title: String, _ symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.headline)
+    }
+
+    private var matchCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            cardTitle("When the notification contains", "magnifyingglass")
+            queryField
+            queryStatus
+            HStack(spacing: 8) {
+                Image(systemName: "testtube.2").foregroundStyle(.secondary)
+                TextField("Test against text", text: $testText,
+                          prompt: Text("Paste a notification's text to try the query"))
+                    .textFieldStyle(.plain)
+                if !testText.isEmpty { testResult.font(.callout) }
+            }
+            .font(.callout)
+            Text("Leave the query empty to match every notification from the chosen app.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentCard()
+    }
+
+    private var actionCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            cardTitle("Then", "bolt.fill")
+            Picker("Action", selection: kindBinding) {
+                ForEach(ActionKind.allCases) { kind in
+                    Label(kind.title, systemImage: kind.symbol).tag(kind)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            actionEditor
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentCard()
+    }
+
+    /// Floating control layer: volume and preview stay in reach while the form scrolls beneath.
+    private var playbackBar: some View {
+        GlassGroup(spacing: 12) {
+            HStack(spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                    Slider(value: $rule.volume, in: 0...2, step: 0.01)
+                        .background(alignment: .center) {
+                            Capsule()   // marker at 100%
+                                .fill(Color.secondary.opacity(0.55))
+                                .frame(width: 2, height: 12)
+                                .allowsHitTesting(false)
+                        }
+                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                    Text("\(Int((rule.volume * 100).rounded()))%")
+                        .font(.body.monospacedDigit())
+                        .frame(width: 48, alignment: .trailing)
+                    Button { rule.volume = 1.0 } label: { Image(systemName: "arrow.counterclockwise") }
+                        .buttonStyle(.borderless)
+                        .disabled(abs(rule.volume - 1.0) < 0.005)
+                        .help("Reset to 100%")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .glassCard(cornerRadius: 22)
+
+                HStack(spacing: 8) {
+                    Button {
+                        state.stopPreview()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                    }
+                    .glassButton()
+                    .help("Stop")
+                    Button {
+                        state.preview(action: rule.action, volume: rule.volume, sample: nil)
+                    } label: {
+                        Label("Preview", systemImage: "play.fill")
+                    }
+                    .glassButton(prominent: true)
+                    .keyboardShortcut("p", modifiers: .command)
+                    .help("Preview (⌘P)")
+                }
+                .controlSize(.large)
+            }
+        }
     }
 
     // MARK: Query
 
     private var queryField: some View {
-        HStack {
+        HStack(spacing: 8) {
             TextField("Query", text: $rule.query,
                       prompt: Text("e.g. #prod-* OR deploy NOT failed"))
-                .font(.body.monospaced())
+                .textFieldStyle(.plain)
+                .font(.system(size: 16, design: .monospaced))
                 .autocorrectionDisabled()
+                .focused($queryFocused)
             Button {
                 showSyntaxHelp.toggle()
             } label: {
@@ -84,6 +178,7 @@ struct RuleEditor: View {
                 QuerySyntaxHelp()
             }
         }
+        .fieldChrome(isInvalid: QueryExpression.validate(rule.query) != nil)
     }
 
     @ViewBuilder private var queryStatus: some View {
@@ -140,13 +235,20 @@ struct RuleEditor: View {
     @ViewBuilder private var actionEditor: some View {
         switch rule.action {
         case .sound(let soundID):
-            LabeledContent("Sound") {
-                HStack {
+            Button { showSoundPicker = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "speaker.wave.2.fill").foregroundStyle(Color.accentColor)
                     Text(state.sound(withID: soundID)?.name ?? "Missing sound")
-                        .foregroundStyle(state.sound(withID: soundID) == nil ? .red : .primary)
-                    Button("Choose…") { showSoundPicker = true }
+                        .foregroundStyle(state.sound(withID: soundID) == nil ? Color.red : Color.primary)
+                    Spacer()
+                    Text("Choose…").foregroundStyle(.secondary)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
+                .font(.body)
+                .fieldChrome()
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .sheet(isPresented: $showSoundPicker) {
                 SoundPickerSheet(selection: soundIDBinding, volume: rule.volume)
             }
@@ -160,13 +262,17 @@ struct RuleEditor: View {
             }
             .id(voiceID ?? "")
             TextField("Template", text: templateBinding(current: template))
+                .textFieldStyle(.plain)
                 .font(.body.monospaced())
+                .fieldChrome()
             Text("Placeholders: {app}  {title}  {subtitle}  {body}")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .shortcut(let name):
             HStack {
                 TextField("Shortcut name", text: shortcutBinding)
+                    .textFieldStyle(.plain)
+                    .fieldChrome()
                 Menu {
                     if shortcutNames.isEmpty {
                         Text("No shortcuts found")
@@ -224,33 +330,6 @@ struct RuleEditor: View {
             get: { if case .shortcut(let n) = rule.action { return n } else { return "" } },
             set: { rule.action = .shortcut(name: $0) }
         )
-    }
-
-    // MARK: Volume
-
-    private var volumeRow: some View {
-        LabeledContent("Volume") {
-            HStack(spacing: 8) {
-                Slider(value: $rule.volume, in: 0...2, step: 0.01)
-                    .background(alignment: .center) {
-                        // Marker at 100%.
-                        Capsule()
-                            .fill(Color.secondary.opacity(0.6))
-                            .frame(width: 2, height: 12)
-                            .offset(y: 0)
-                            .allowsHitTesting(false)
-                    }
-                    .frame(minWidth: 160)
-                Text("\(Int((rule.volume * 100).rounded()))%")
-                    .monospacedDigit()
-                    .frame(width: 44, alignment: .trailing)
-                Button("100%") { rule.volume = 1.0 }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .disabled(abs(rule.volume - 1.0) < 0.005)
-                    .help("Reset to 100%")
-            }
-        }
     }
 }
 

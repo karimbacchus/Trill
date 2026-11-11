@@ -71,6 +71,7 @@ final class AppState: ObservableObject {
         let me = self
         Task.detached(priority: .utility) {
             lib.generateBuiltIns()
+            InstalledApps.shared.warm()
             await MainActor.run { me.refreshSounds() }
         }
 
@@ -198,37 +199,7 @@ final class AppState: ObservableObject {
     // MARK: Apps and shortcuts
 
     func installedApps() -> [AppInfo] {
-        var byID: [String: AppInfo] = [:]
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-        let roots = [URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/System/Applications"), home]
-
-        func consider(_ url: URL) {
-            guard let b = Bundle(url: url), let id = b.bundleIdentifier, byID[id] == nil else { return }
-            let name = (b.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-                ?? (b.object(forInfoDictionaryKey: "CFBundleName") as? String)
-                ?? url.deletingPathExtension().lastPathComponent
-            byID[id] = AppInfo(name: name, bundleID: id)
-        }
-        func scan(_ dir: URL, depth: Int) {
-            guard let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey],
-                                                          options: [.skipsHiddenFiles]) else { return }
-            for item in items {
-                if item.pathExtension == "app" { consider(item) }
-                else if depth > 0, (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                    scan(item, depth: depth - 1)
-                }
-            }
-        }
-        for r in roots { scan(r, depth: 2) }
-        for app in NSWorkspace.shared.runningApplications {
-            guard let id = app.bundleIdentifier, byID[id] == nil, let name = app.localizedName, !name.isEmpty else { continue }
-            byID[id] = AppInfo(name: name, bundleID: id)
-        }
-        return byID.values.sorted {
-            let c = $0.name.localizedCaseInsensitiveCompare($1.name)
-            return c == .orderedSame ? $0.bundleID < $1.bundleID : c == .orderedAscending
-        }
+        InstalledApps.shared.all()
     }
 
     func shortcutNames() async -> [String] {

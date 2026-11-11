@@ -13,6 +13,14 @@ if [ -d "$PLUGINS" ] && ! xcode-select -p 2>/dev/null | grep -q "Xcode.app"; the
     EXTRA=(-Xswiftc -plugin-path -Xswiftc "$PLUGINS")
 fi
 
+# Record the real SDK version in the binary (SwiftPM writes the deployment target instead).
+# macOS only gives an app the current system look (Liquid Glass sidebars and toolbars) when it was linked
+# against a recent SDK; the minimum OS stays 13.0.
+SDKVER="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)"
+if [ -n "$SDKVER" ]; then
+    EXTRA+=(-Xlinker -platform_version -Xlinker macos -Xlinker 13.0 -Xlinker "$SDKVER")
+fi
+
 swift build -c release ${EXTRA[@]+"${EXTRA[@]}"}
 BIN="$(swift build -c release --show-bin-path)/Trill"
 
@@ -22,6 +30,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Trill"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+# Bundled sound packs.
+if [ -d "$ROOT/Resources/Sounds" ]; then
+    cp -R "$ROOT/Resources/Sounds" "$APP/Contents/Resources/Sounds"
+fi
 
 # Icon (optional: skipped if generation fails).
 ICONSET="$ROOT/build/Trill.iconset"

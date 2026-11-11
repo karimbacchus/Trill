@@ -6,36 +6,44 @@ macOS plays the same ping whether production is down or someone reacted in `#ran
 menu bar app that listens for notification banners and plays the sound *you* chose for each one, based
 on rules you write: per app, channel, person or keyword.
 
-![The Rules window: an ordered list of rules and the editor for one of them](docs/rules.png)
+![App sounds: pick the notification sound for each app you have installed](docs/app-sounds.png)
 
 ## What it does
 
-- **Rules, top to bottom.** Each rule has an optional app, a query, an action and its own volume. The
-  first enabled rule that matches wins.
+- **App sounds.** Trill finds the chat and mail apps you already have (Slack, Microsoft Teams, Discord,
+  Messages, Mail, Outlook, WhatsApp and more) and lets you pick each one's notification sound, volume
+  and on/off in one place.
+- **Rules for the specifics.** For one channel, person or keyword, add a rule: an optional app, a
+  query, an action and its own volume. Rules run top to bottom and the first enabled match wins.
 - **A small query language.** `#incident-* OR #prod-*`, `#deploys AND deploy NOT failed`,
   `"on fire"`, `title:Sam`. Wildcards, quotes, parentheses, `AND` / `OR` / `NOT`.
 - **Four actions.** Play a sound, speak the notification aloud in a voice you pick, run a Shortcut, or
   stay silent.
 - **Volume per rule, up to 200%**, so an alert can cut through while chatter stays quiet.
-- **Sounds.** The macOS system sounds, 24 built-in sounds synthesized on first launch, any audio file
-  you import, and "text to sound" (type a phrase, pick a voice, save it to your library).
+- **Over 130 sounds.** 95 bundled sounds from three openly licensed packs, 24 synthesized on first
+  launch, the macOS system sounds, any audio file you import, and "text to sound" (type a phrase, pick
+  a voice, save it to your library).
 - **Diagnostics.** See every notification Trill captured and which rule matched it, turn a missed one
   straight into a rule, and send test notifications.
 - **Private.** Everything runs locally. Trill has no network code and does not talk to Slack, Teams or
   anyone else; it only reads the banner text macOS shows on screen.
+- **Liquid Glass** on macOS 26 and later, with a plain-material fallback back to macOS 13.
 
-![The Diagnostics window: captured notifications and the rule each one matched](docs/diagnostics.png)
+![The rule editor: match a query, then play a sound at its own volume](docs/rules.png)
+
+![Diagnostics: captured notifications and the rule each one matched](docs/diagnostics.png)
 
 ## Install
 
 1. Download `Trill.zip` from the [latest release](https://github.com/karimbacchus/Trill/releases/latest)
    and unzip it.
-2. Move `Trill.app` to Applications and open it. The build is signed with a Developer ID but **not
-   notarized**, so the first time you need to right-click the app and choose **Open** (or allow it under
-   System Settings → Privacy & Security).
+2. Move `Trill.app` to Applications and open it. The build is signed with a Developer ID and notarized
+   by Apple.
 3. Trill lives in the menu bar (waveform icon, no Dock icon). Click **Grant** in the Rules window and
    enable Trill under System Settings → Privacy & Security → Accessibility. This is how it reads
    notification banners.
+4. Pick a sound for each app under **App sounds**. Trill plays its sound on top of the app's own, so to
+   hear only Trill's, turn the app's notification sound off in System Settings → Notifications.
 
 Requires macOS 13 or later. Built and tested on macOS 27, Apple Silicon.
 
@@ -57,8 +65,8 @@ Requires macOS 13 or later. Built and tested on macOS 27, Apple Silicon.
 the title, subtitle and body. The editor validates the query as you type and has a "Test against text"
 field.
 
-The app filter matches the name macOS shows on the banner (for example "Slack"), because banners do not
-carry a bundle identifier.
+Banners carry the app's display name but no bundle identifier, so Trill resolves the name against your
+installed apps. A rule's app filter can be either the name ("Slack") or the bundle ID.
 
 ## Build from source
 
@@ -97,7 +105,20 @@ Rules, settings and sounds are stored in `~/Library/Application Support/Trill`.
 - `TRILL_DATA_DIR=/some/folder Trill --demo` runs against a separate data folder and feeds sample
   notifications through the rules (used to make the screenshots above).
 
-## Credits
+## Sounds and credits
+
+The bundled sounds are all CC0 (public domain); thank you to their authors. Details and licence texts
+are in [Resources/Sounds/CREDITS.md](Resources/Sounds/CREDITS.md).
+
+| Pack | Author | Source |
+|---|---|---|
+| Notification Tones | Aarni Koskela | [akx/Notifications](https://github.com/akx/Notifications) |
+| Kenney Interface | Kenney | [kenney.nl](https://kenney.nl/assets/interface-sounds) |
+| UI SFX | Yuki Capital / Romain Simon | [romainsimon/uisfx](https://github.com/romainsimon/uisfx) |
 
 Trill is an independent project inspired by the idea behind [Chirpy](https://chirpy.pro). It shares no
 code, sounds or artwork with it.
+
+## License
+
+[MIT](LICENSE). The bundled sound packs keep their own (CC0) licences.
