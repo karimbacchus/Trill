@@ -30,6 +30,12 @@ enum TrillEntry {
             other = running.first { $0.executableURL != nil && $0.executableURL == Bundle.main.executableURL }
         }
         other?.activate(options: [.activateIgnoringOtherApps])
+        // With the menu bar icon hidden, activating is invisible: ask the running instance to show its
+        // Rules window. Give the notification a moment to be delivered before this process exits.
+        DistributedNotificationCenter.default().postNotificationName(
+            WindowRouter.showRulesNotification, object: WindowRouter.showRulesObject,
+            userInfo: nil, deliverImmediately: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         return false
     }
 
@@ -39,6 +45,10 @@ enum TrillEntry {
             exit(0)
         }
         guard acquireSingleInstanceLock() else { return }
-        TrillApp.main()
+        if #available(macOS 15.0, *) {
+            TrillApp15.main()
+        } else {
+            TrillApp.main()
+        }
     }
 }

@@ -3,16 +3,40 @@ import AppKit
 import Combine
 import TrillCore
 
+/// The app's scenes. Two `App` types (macOS 15+ and earlier) share them, because `defaultLaunchBehavior`
+/// only exists on 15 and a scene builder cannot branch on availability.
 struct TrillApp: App {
     @NSApplicationDelegateAdaptor(TrillAppDelegate.self) private var delegate
+    var body: some Scene {
+        TrillScenes()
+        // Never opened before macOS 15; the menu bar label hook does the work there.
+        Window("Trill", id: WindowID.host) { HostView() }
+            .commands { TrillCommands() }
+    }
+}
+
+@available(macOS 15.0, *)
+struct TrillApp15: App {
+    @NSApplicationDelegateAdaptor(TrillAppDelegate.self) private var delegate
+    var body: some Scene {
+        TrillScenes()
+        // Invisible; presented at launch so its view owns the `openWindow` / `openSettings` actions even
+        // when the menu bar icon is hidden.
+        Window("Trill", id: WindowID.host) { HostView() }
+            .defaultLaunchBehavior(.presented)
+            .commands { TrillCommands() }
+    }
+}
+
+private struct TrillScenes: Scene {
     @ObservedObject private var state = AppState.shared
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: menuBarIconInserted) {
             MenuBarContent()
         } label: {
             Image(systemName: state.settings.isPaused ? "pause.circle" : "waveform.circle")
-                .modifier(LaunchWindows())
+                .modifier(LegacyLaunchHook())
         }
 
         Window("Rules", id: WindowID.rules) {
@@ -29,11 +53,26 @@ struct TrillApp: App {
             SettingsView()
         }
     }
+
+    /// Without the invisible host window (before macOS 15) nothing could reopen Trill with the icon hidden,
+    /// so the icon is then always shown.
+    private var menuBarIconInserted: Binding<Bool> {
+        Binding(
+            get: { state.settings.showMenuBarIcon || !WindowRouter.canHideMenuBarIcon },
+            // SwiftUI writes the value back when it first reads it; storing it again would republish the
+            // settings and loop, so only real changes (and only where hiding is allowed) are stored.
+            set: { newValue in
+                guard WindowRouter.canHideMenuBarIcon, state.settings.showMenuBarIcon != newValue else { return }
+                state.settings.showMenuBarIcon = newValue
+            }
+        )
+    }
 }
 
 enum WindowID {
     static let rules = "rules"
     static let diagnostics = "diagnostics"
+    static let host = "host"
 }
 
 @MainActor
@@ -46,11 +85,24 @@ final class TrillAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppState.shared.start()
+        // A second launch of Trill (see TrillMain) asks this instance to show its Rules window.
+        DistributedNotificationCenter.default().addObserver(
+            forName: WindowRouter.showRulesNotification, object: WindowRouter.showRulesObject, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { WindowRouter.shared.show(WindowID.rules) }
+        }
         AppState.shared.$settings
             .map(\.appearance)
             .removeDuplicates()
             .sink { Self.apply(appearance: $0) }
             .store(in: &cancellables)
+    }
+
+    /// Finder, Spotlight and Launchpad send this to the running instance. It is what makes a Trill with no
+    /// menu bar icon reachable.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        WindowRouter.shared.show(WindowID.rules)
+        return false
     }
 
     static func apply(appearance: Appearance) {
@@ -72,27 +124,10 @@ enum AppActivation {
         }
     }
 
-    @MainActor
-    static func open(_ id: String, using openWindow: OpenWindowAction) {
-        activate()
-        openWindow(id: id)
-        DispatchQueue.main.async { activate() }
-    }
-
-    @MainActor
-    static func openSettings() {
-        activate()
-        // Ventura's selector is showSettingsWindow:; the older name is only a fallback.
-        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-        DispatchQueue.main.async { activate() }
-    }
 }
 
 struct MenuBarContent: View {
     @ObservedObject private var state = AppState.shared
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Button(state.settings.isPaused ? "Resume Trill" : "Pause Trill") {
@@ -104,97 +139,39 @@ struct MenuBarContent: View {
             }
         }
         Divider()
-        Button("Rules…") { AppActivation.open(WindowID.rules, using: openWindow) }
-        Button("Diagnostics…") { AppActivation.open(WindowID.diagnostics, using: openWindow) }
-        if #available(macOS 14.0, *) {
-            SettingsMenuButton()
-        } else {
-            Button("Settings…") { AppActivation.openSettings() }
-                .keyboardShortcut(",")
-        }
+        Button("Rules…") { WindowRouter.shared.show(WindowID.rules) }
+        Button("Diagnostics…") { WindowRouter.shared.show(WindowID.diagnostics) }
+        Button("Settings…") { WindowRouter.shared.showSettings() }
+            .keyboardShortcut(",")
         Divider()
         Button("Quit Trill") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 }
 
-/// Attached to the menu bar icon, which is the only view that exists at launch.
-/// Opens the Rules window on first run (no rules yet, or no Accessibility access), so a new user sees
-/// something. `Trill --demo` also opens the other windows and feeds sample notifications through the
-/// rules, for regenerating the README screenshots; combine with TRILL_DATA_DIR to keep real data untouched.
-private struct LaunchWindows: ViewModifier {
+/// Before macOS 15 there is no invisible host window, so the (always shown) menu bar icon captures
+/// `openWindow` instead.
+private struct LegacyLaunchHook: ViewModifier {
     @Environment(\.openWindow) private var openWindow
-    private static var didRun = false
-    private static var demoSettingsWindow: NSWindow?
 
     func body(content: Content) -> some View {
         content.onAppear {
-            guard !Self.didRun else { return }
-            Self.didRun = true
-            let demo = CommandLine.arguments.contains("--demo")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                let state = AppState.shared
-                if demo || state.rules.isEmpty || !state.isAccessibilityTrusted {
-                    AppActivation.open(WindowID.rules, using: openWindow)
-                }
-                if demo { runDemo() }
-            }
-        }
-    }
-
-    /// `--demo` options (all optional, for README screenshots):
-    ///   --pane=app-sounds (default) | rule   which pane the Rules window shows
-    ///   --picker                             open the sound picker on the first app
-    ///   --settings                           also open Settings
-    ///   --no-diagnostics                     do not open the Diagnostics window
-    private func runDemo() {
-        let args = CommandLine.arguments
-        if args.contains("--pane=rule") {
-            UIRouter.shared.selectedRuleID = AppState.shared.rules.first?.id
-        } else {
-            UIRouter.shared.showAppSounds = true
-        }
-        if args.contains("--picker") { UIRouter.shared.demoOpenPicker = true }
-        if args.contains("--settings") {
-            // Hosted in a plain window so it can be captured reliably.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
-                window.title = "Settings"
-                window.styleMask = [.titled, .closable]
-                window.center()
-                window.makeKeyAndOrderFront(nil)
-                Self.demoSettingsWindow = window
-            }
-        }
-        if !args.contains("--no-diagnostics") { openWindow(id: WindowID.diagnostics) }
-        let samples: [(String, String, String, String)] = [
-            ("Slack", "#incident-142", "Checkout latency is above 2s in eu-west", "com.tinyspeck.slackmacgap"),
-            ("Messages", "Sam", "Running five minutes late", "com.apple.MobileSMS"),
-            ("Slack", "#deploys", "deploy of api@4f2c1 finished", "com.tinyspeck.slackmacgap"),
-            ("Mail", "Weekly newsletter", "Ten things we shipped this month", "com.apple.mail"),
-            ("Calendar", "Design review", "Starts in 10 minutes", "com.apple.iCal"),
-        ]
-        for (index, sample) in samples.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 + Double(index) * 0.4) {
-                AppState.shared.sendTestNotification(makeNotification(
-                    appName: sample.0, bundleID: sample.3, title: sample.1, subtitle: "", body: sample.2))
-            }
+            guard !WindowRouter.canHideMenuBarIcon else { return }
+            WindowRouter.shared.attach(openWindow: openWindow)
+            WindowRouter.shared.launchOnce()
         }
     }
 }
 
-/// On macOS 14+ the supported way to open the Settings scene is the `openSettings` action;
-/// sending `showSettingsWindow:` no longer works reliably.
-@available(macOS 14.0, *)
-private struct SettingsMenuButton: View {
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
-        Button("Settings…") {
-            AppActivation.activate()
-            openSettings()
-            DispatchQueue.main.async { AppActivation.activate() }
+/// App menu additions, so Rules and Diagnostics are reachable from the menu bar of whichever Trill window is
+/// active (Settings and Quit are already there).
+struct TrillCommands: Commands {
+    var body: some Commands {
+        CommandGroup(after: .appSettings) {
+            Button("Rules…") { WindowRouter.shared.show(WindowID.rules) }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Diagnostics…") { WindowRouter.shared.show(WindowID.diagnostics) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
         }
-        .keyboardShortcut(",")
     }
 }

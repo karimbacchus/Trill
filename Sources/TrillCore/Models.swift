@@ -95,10 +95,12 @@ public struct AppSettings: Codable, Hashable, Sendable {
     public var muteAppOwnSounds: Bool
     /// Bundle IDs whose macOS notification sound Trill turned off (so it can turn it back on).
     public var mutedBundleIDs: [String]
+    /// Show the Trill icon in the menu bar. When off, opening Trill again shows its Rules window.
+    public var showMenuBarIcon: Bool
 
-    public init() { appearance = .system; isPaused = false; muteAppOwnSounds = true; mutedBundleIDs = [] }
+    public init() { appearance = .system; isPaused = false; muteAppOwnSounds = true; mutedBundleIDs = []; showMenuBarIcon = true }
 
-    enum CodingKeys: String, CodingKey { case appearance, isPaused, muteAppOwnSounds, mutedBundleIDs }
+    enum CodingKeys: String, CodingKey { case appearance, isPaused, muteAppOwnSounds, mutedBundleIDs, showMenuBarIcon }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -106,5 +108,6 @@ public struct AppSettings: Codable, Hashable, Sendable {
         isPaused = (try? c.decodeIfPresent(Bool.self, forKey: .isPaused)) ?? false
         muteAppOwnSounds = (try? c.decodeIfPresent(Bool.self, forKey: .muteAppOwnSounds)) ?? true
         mutedBundleIDs = (try? c.decodeIfPresent([String].self, forKey: .mutedBundleIDs)) ?? []
+        showMenuBarIcon = (try? c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon)) ?? true
     }
 }

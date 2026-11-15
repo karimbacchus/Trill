@@ -39,7 +39,8 @@ on rules you write: per app, channel, person or keyword.
    and unzip it.
 2. Move `Trill.app` to Applications and open it. The build is signed with a Developer ID and notarized
    by Apple.
-3. Trill lives in the menu bar (waveform icon, no Dock icon). Click **Grant** in the Rules window and
+3. Trill lives in the menu bar (waveform icon, no Dock icon). You can hide the icon in Settings; opening
+   Trill again then shows its window. Click **Grant** in the Rules window and
    enable Trill under System Settings → Privacy & Security → Accessibility. This is how it reads
    notification banners.
 4. Pick a sound for each app under **App sounds**.

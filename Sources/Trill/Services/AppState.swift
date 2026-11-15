@@ -79,7 +79,11 @@ final class AppState: ObservableObject {
 
     private static let maxLog = 200
 
-    init() {}
+    init() {
+        // Settings are needed before the scenes are built (e.g. whether the menu bar icon is shown),
+        // so they are loaded here rather than in start(). Property observers do not run during init.
+        settings = store.loadSettings()
+    }
 
     // MARK: Lifecycle
 

@@ -4,7 +4,6 @@ import TrillCore
 
 struct DiagnosticsView: View {
     @ObservedObject private var state = AppState.shared
-    @Environment(\.openWindow) private var openWindow
 
     @State private var selection = Set<LogEntry.ID>()
     @State private var testApp = "Test App"
@@ -191,7 +190,7 @@ struct DiagnosticsView: View {
         )
         state.rules.insert(rule, at: 0)
         UIRouter.shared.selectedRuleID = rule.id
-        AppActivation.open(WindowID.rules, using: openWindow)
+        WindowRouter.shared.show(WindowID.rules)
     }
 
     // MARK: Test form

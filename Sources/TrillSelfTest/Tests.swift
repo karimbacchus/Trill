@@ -170,6 +170,11 @@ final class StoreTests: TestCase {
         XCTAssertTrue(r.isEnabled); XCTAssertEqual(r.volume, 1.0); XCTAssertEqual(r.query, "")
         let st = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
         XCTAssertEqual(st, AppSettings())
+        XCTAssertTrue(st.showMenuBarIcon)
+        let hidden = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"showMenuBarIcon":false}"#.utf8))
+        XCTAssertFalse(hidden.showMenuBarIcon)
+        let bad = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"showMenuBarIcon":"x"}"#.utf8))
+        XCTAssertTrue(bad.showMenuBarIcon)
     }
 }
 

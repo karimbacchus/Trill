@@ -39,6 +39,22 @@ struct RulesView: View {
                     .disabled(selectedIndex == nil)
                     .help("Delete rule")
             }
+            // Always reachable here, so Diagnostics and Settings never depend on the menu bar icon.
+            ToolbarItem {
+                Menu {
+                    Button("Diagnostics…") { WindowRouter.shared.show(WindowID.diagnostics) }
+                    Button("Settings…") { WindowRouter.shared.showSettings() }
+                    Divider()
+                    Button(state.settings.isPaused ? "Resume Trill" : "Pause Trill") {
+                        state.settings.isPaused.toggle()
+                    }
+                    Divider()
+                    Button("Quit Trill") { NSApp.terminate(nil) }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+                .help("Diagnostics, Settings and Quit")
+            }
         }
     }
 
